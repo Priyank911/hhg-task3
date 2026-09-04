@@ -1,0 +1,40 @@
+{
+  "search_metadata": {
+    "id": "mock-search-12345",
+    "status": "Success",
+    "json_endpoint": "https://serpapi.com/searches/mock.json",
+    "created_at": "2026-09-04 07:00:00 UTC",
+    "processed_at": "2026-09-04 07:00:01 UTC",
+    "google_lens_url": "https://lens.google.com/search?p=mock",
+    "raw_html_file": "https://serpapi.com/searches/mock.html",
+    "total_time_taken": 1.2
+  },
+  "exact_matches": [
+    {
+      "position": 1,
+      "title": "Discussion on Engineering Portfolio and Social Identity",
+      "link": "https://www.reddit.com/r/programming/comments/sample1/my_project_release/",
+      "source": "Reddit",
+      "thumbnail": "https://example-mock.invalid/images/thumb1.jpg",
+      "original": "https://example-mock.invalid/images/original1.jpg"
+    }
+  ],
+  "visual_matches": [
+    {
+      "position": 2,
+      "title": "Official Announcement and Photo",
+      "link": "https://www.instagram.com/p/SampleInstagramPost/",
+      "source": "Instagram",
+      "thumbnail": "https://example-mock.invalid/images/insta_thumb.jpg",
+      "original": "https://example-mock.invalid/images/insta_full.jpg"
+    },
+    {
+      "position": 3,
+      "title": "General Web Page Match",
+      "link": "https://news.example.com/article/tech-update",
+      "source": "Tech News",
+      "thumbnail": "https://example-mock.invalid/images/news.jpg",
+      "original": "https://example-mock.invalid/images/news.jpg"
+    }
+  ]
+}

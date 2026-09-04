@@ -1,0 +1,12 @@
+{
+  "schema": "org.hhgoa.face-web-evidence.consent/v1",
+  "subjectId": "anonymous-operator",
+  "scope": "hh-goa-demo",
+  "purpose": "Demonstration of facial reverse image discovery and cryptographic verification",
+  "confirmed": true,
+  "biometricProcessingPermitted": true,
+  "thirdPartySearchPermitted": true,
+  "blockchainHashRegistrationPermitted": true,
+  "retentionHours": 24,
+  "createdAt": "2026-09-04T12:00:00Z"
+}
