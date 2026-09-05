@@ -9,6 +9,7 @@ from app.services.search import (
     SearchCandidate,
     SerpApiLensAdapter,
     classify_social_platform,
+    is_direct_social_url,
 )
 
 
@@ -48,3 +49,65 @@ def test_parse_lens_response():
     assert candidates[0].platform == "reddit"
     assert candidates[0].position == 1
     assert "reddit.com" in candidates[0].link
+
+
+def test_search_result_bundle_exposes_social_links():
+    bundle = MockSearchAdapter(
+        mock_candidates=[
+            SearchCandidate(position=1, title="News match", link="https://news.example/article"),
+            SearchCandidate(
+                position=2,
+                title="Social match",
+                link="https://www.instagram.com/p/example/",
+                platform="instagram",
+            ),
+        ]
+    ).search(b"image")
+
+    assert bundle.social_links == ["https://www.instagram.com/p/example/"]
+
+
+def test_exact_social_link_is_preferred_over_visual_repost():
+    bundle = MockSearchAdapter(
+        mock_candidates=[
+            SearchCandidate(
+                position=1,
+                title="Visual repost",
+                link="https://www.instagram.com/p/repost/",
+                platform="instagram",
+                match_type="visual_matches",
+            ),
+            SearchCandidate(
+                position=2,
+                title="Exact post",
+                link="https://www.instagram.com/p/original/",
+                platform="instagram",
+                match_type="exact_matches",
+            ),
+        ]
+    ).search(b"image")
+
+    assert bundle.social_links[0] == "https://www.instagram.com/p/original/"
+
+
+def test_social_links_exclude_discovery_pages_and_limit_results():
+    candidates = [
+        SearchCandidate(
+            position=index,
+            title="Result",
+            link=f"https://www.instagram.com/{path}",
+            platform="instagram",
+        )
+        for index, path in enumerate(
+            ["popular/topic/", "p/one/", "p/two/", "p/three/", "p/four/", "p/five/", "p/six/"],
+            start=1,
+        )
+    ]
+    bundle = MockSearchAdapter(mock_candidates=candidates).search(b"image")
+
+    assert is_direct_social_url("https://www.instagram.com/p/one/", "instagram") is True
+    assert is_direct_social_url("https://www.instagram.com/popular/topic/", "instagram") is False
+    assert len(bundle.social_links) == 5
+    assert all("/popular/" not in link for link in bundle.social_links)
+    assert is_direct_social_url("https://x.com/user/status/123", "x") is True
+    assert is_direct_social_url("https://x.com/user", "x") is False

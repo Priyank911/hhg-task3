@@ -7,6 +7,7 @@ import pytest
 from app.config import Settings
 from app.pipeline import EvidencePipeline, PipelineErrorCode, PipelineExecutionError
 from app.services.manifest import ManifestBuilder
+from app.services.search import MockSearchAdapter
 
 
 @pytest.fixture
@@ -91,3 +92,35 @@ def test_mock_e2e_pipeline(test_settings: Settings):
     is_valid, computed_hash, _, _ = ManifestBuilder.verify_manifest_integrity(run_dir / "manifest.json")
     assert is_valid is True
     assert computed_hash == result["evidence_hash"]
+
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["candidate"]["socialUrl"] == manifest["candidate"]["pageUrl"]
+
+
+def test_live_mode_requires_blockchain_anchor(test_settings: Settings):
+    query_fixture = Path(__file__).parent / "fixtures" / "query.jpg"
+    candidate_fixture = Path(__file__).parent / "fixtures" / "candidate.jpg"
+
+    if not query_fixture.exists():
+        pytest.skip("Test query face fixture not downloaded yet.")
+
+    pipeline = EvidencePipeline(test_settings)
+    pipeline.search_adapter = MockSearchAdapter()
+    original_search = pipeline.search_adapter.search
+
+    def live_search(search_bytes: bytes):
+        bundle = original_search(search_bytes)
+        return bundle.model_copy(update={"execution_mode": "live"})
+
+    pipeline.search_adapter.search = live_search
+
+    with pytest.raises(PipelineExecutionError) as exc_info:
+        pipeline.run(
+            input_image_path=query_fixture,
+            face_index=0,
+            consent_confirmed=True,
+            mock_candidate_image_bytes=candidate_fixture.read_bytes(),
+            custom_run_id="test-live-requires-chain",
+        )
+
+    assert exc_info.value.code == PipelineErrorCode.FAILED_CHAIN_WRITE

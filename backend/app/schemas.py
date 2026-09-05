@@ -81,6 +81,7 @@ class CandidateEvidence(BaseModel):
 
     platform: str
     pageUrl: str
+    socialUrl: str | None = None
     title: str
     candidateImageUrl: str
     candidateImageSha256: str

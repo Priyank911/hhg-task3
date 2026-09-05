@@ -36,6 +36,8 @@ app = typer.Typer(
     help="Face Identification & Blockchain Verification CLI",
     add_completion=False,
 )
+
+
 console = Console(highlight=False)
 
 
@@ -153,13 +155,12 @@ def run_pipeline(
         console.print("\n[bold green]Pipeline Execution Completed Successfully![/bold green]\n")
         
         table = Table(title="Execution & Evidence Summary")
-        table.add_column("Property", style="cyan")
-        table.add_column("Value", style="white")
+        table.add_column("Property", style="cyan", no_wrap=True)
+        table.add_column("Value", style="white", no_wrap=False, overflow="fold", max_width=120)
 
         table.add_row("Run ID", result["run_id"])
         table.add_row("Run Directory", result["run_dir"])
         table.add_row("Search Mode", result["search_mode"].upper())
-        table.add_row("Discovered Social URL", result["page_url"])
         table.add_row("Classified Platform", result["platform"].upper())
         table.add_row("Candidate Accepted?", "[green]YES[/green]" if result["accepted"] else "[red]NO[/red]")
         table.add_row("Similarity Score", f"{result['score']:.6f}")
@@ -177,6 +178,15 @@ def run_pipeline(
             table.add_row("Blockchain Anchor", "[yellow]Contract address or attester key not configured (Evidence saved locally)[/yellow]")
 
         console.print(table)
+
+        console.print("\n[bold cyan]Matched Page URL[/bold cyan]")
+        console.print(result["page_url"], markup=False, soft_wrap=True)
+
+        social_urls = result.get("social_urls", [])
+        if social_urls:
+            console.print("\n[bold cyan]Priority Social URLs[/bold cyan]")
+            for index, social_url in enumerate(social_urls, start=1):
+                console.print(f"{index}. {social_url}", markup=False, soft_wrap=True)
 
     except PipelineExecutionError as pe:
         console.print(f"[bold red]Pipeline Failed [{pe.code}]:[/bold red] {pe.message}")
@@ -246,13 +256,21 @@ def verify_manifest(
             table.add_row("Registration Timestamp", str(record_info["registeredAt"]))
             table.add_row("Attester Valid?", "[green]YES[/green]" if attester_valid else "[red]NO[/red]")
 
+        local_integrity = is_valid
+        blockchain_verification = bool(addr and on_chain_found and attester_valid)
         table.add_row(
-            "Evidence Integrity Status",
-            "[bold green]VERIFIED (Tamper-Evident & Unchanged)[/bold green]" if (on_chain_found or not addr) else "[bold red]FAILED (Hash mismatch or not registered)[/bold red]",
+            "Local Manifest Integrity",
+            "[bold green]VALID (hash reconstructs)[/bold green]" if local_integrity else "[bold red]FAILED (manifest changed)[/bold red]",
+        )
+        table.add_row(
+            "On-Chain Verification",
+            "[bold green]VERIFIED (exact hash and attester found)[/bold green]" if blockchain_verification else "[bold red]NOT VERIFIED[/bold red]",
         )
         table.add_row("Identity Conclusively Proven?", "[bold cyan]NO (Local biometric similarity claim only)[/bold cyan]")
 
         console.print(table)
+        if not local_integrity or not blockchain_verification:
+            raise typer.Exit(code=1)
 
     except Exception as e:
         console.print(f"[bold red]Verification Failed:[/bold red] {e}")

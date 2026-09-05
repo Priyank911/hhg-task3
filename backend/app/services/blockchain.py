@@ -134,6 +134,18 @@ class BlockchainService:
             raise BlockchainError("Contract address is not configured.")
         if not self.private_key:
             raise BlockchainError("Attester private key is required for blockchain registration.")
+        if not self.is_connected():
+            raise BlockchainError(f"Blockchain RPC is unavailable: {self.rpc_url}")
+        actual_chain_id = self.w3.eth.chain_id
+        if actual_chain_id != self.chain_id:
+            raise BlockchainError(
+                f"Blockchain chain ID mismatch: configured {self.chain_id}, connected to {actual_chain_id}."
+            )
+        if len(self.w3.eth.get_code(self.contract_address)) == 0:
+            raise BlockchainError(
+                f"No contract bytecode at {self.contract_address}. Deploy EvidenceRegistry to {self.rpc_url} "
+                "before running a live pipeline."
+            )
 
         account = self.w3.eth.account.from_key(self.private_key)
         attester_address = account.address

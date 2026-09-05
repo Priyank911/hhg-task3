@@ -211,12 +211,12 @@ class EvidencePipeline:
 
         candidate_list = search_bundle.candidates[: self.settings.max_candidates]
 
-        for cand in candidate_list:
+        for candidate_index, cand in enumerate(candidate_list, start=1):
             cand_img_url = cand.image or cand.thumbnail
             if not cand_img_url:
                 continue
 
-            cand_id = f"cand-{cand.position}"
+            cand_id = f"cand-{candidate_index}"
             try:
                 # Retrieve candidate image bytes
                 cand_bytes, cand_sha256 = CandidateDownloader.download_image(
@@ -293,6 +293,7 @@ class EvidencePipeline:
         detector_info, recognizer_info = self.face_matcher.get_model_info()
 
         cand_obj: SearchCandidate = candidate_eval["candidate"]
+        social_url = cand_obj.link if cand_obj.platform != "web" else None
 
         manifest = EvidenceManifest(
             schema="org.hhgoa.face-web-evidence/v1",
@@ -323,6 +324,7 @@ class EvidencePipeline:
             candidate=CandidateEvidence(
                 platform=cand_obj.platform,
                 pageUrl=cand_obj.link,
+                socialUrl=social_url,
                 title=cand_obj.title,
                 candidateImageUrl=candidate_eval["candidateImageUrl"],
                 candidateImageSha256=candidate_eval["candidateImageSha256"],
@@ -353,15 +355,26 @@ class EvidencePipeline:
             manifest, run_dir
         )
 
-        # Stage 11: Blockchain Registration (if configured)
+        # Stage 11: Live evidence is not complete until its hash is anchored.
         attestation: Optional[AttestationSidecar] = None
-        if self.blockchain_service.contract_address and self.blockchain_service.private_key:
+        blockchain_configured = (
+            self.blockchain_service.contract_address is not None
+            and self.blockchain_service.private_key is not None
+        )
+        if search_bundle.execution_mode == "live" and not blockchain_configured:
+            raise PipelineExecutionError(
+                PipelineErrorCode.FAILED_CHAIN_WRITE,
+                "Live evidence requires REGISTRY_ADDRESS and ATTESTER_PRIVATE_KEY.",
+            )
+        if blockchain_configured:
             try:
                 attestation = self.blockchain_service.register_evidence_hash(evidence_hash)
                 BlockchainService.save_attestation(attestation, run_dir / "attestation.json")
             except Exception as e:
-                # Record error but preserve evidence bundle
-                print(f"[Warning] Blockchain registration skipped/failed: {e}")
+                raise PipelineExecutionError(
+                    PipelineErrorCode.FAILED_CHAIN_WRITE,
+                    f"Blockchain registration failed: {e}",
+                ) from e
 
         return {
             "run_id": run_id,
@@ -371,6 +384,8 @@ class EvidencePipeline:
             "score": candidate_eval["score"],
             "threshold": self.settings.face_match_threshold,
             "page_url": cand_obj.link,
+            "social_url": social_url,
+            "social_urls": search_bundle.social_links,
             "platform": cand_obj.platform,
             "search_mode": search_bundle.execution_mode,
             "attestation": attestation.model_dump() if attestation else None,

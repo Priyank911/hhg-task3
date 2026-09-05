@@ -21,6 +21,7 @@ class SearchCandidate(BaseModel):
     platform: str = "web"
     image_width: Optional[int] = None
     image_height: Optional[int] = None
+    match_type: str = "visual_matches"
 
 
 class SearchResultBundle(BaseModel):
@@ -31,6 +32,16 @@ class SearchResultBundle(BaseModel):
     raw_response_bytes: bytes
     raw_response_sha256: str
     candidates: List[SearchCandidate]
+
+    @property
+    def social_links(self) -> List[str]:
+        social_candidates = [
+            candidate
+            for candidate in self.candidates
+            if candidate.platform != "web" and is_direct_social_url(candidate.link, candidate.platform)
+        ]
+        social_candidates.sort(key=_social_candidate_sort_key)
+        return [candidate.link for candidate in social_candidates[:5]]
 
 
 class SearchError(Exception):
@@ -71,6 +82,41 @@ def classify_social_platform(url: str) -> str:
     except Exception:
         pass
     return "web"
+
+
+def is_direct_social_url(url: str, platform: str) -> bool:
+    """Return whether a URL points to a post/profile rather than a discovery page."""
+    path = urlparse(url).path.rstrip("/").lower()
+    excluded_prefixes = {
+        "instagram": ("/popular", "/explore", "/accounts", "/about", "/direct"),
+        "facebook": ("/watch", "/marketplace", "/groups"),
+        "youtube": ("/results", "/feed", "/channel"),
+        "linkedin": ("/pulse", "/jobs", "/search"),
+    }
+    if any(path.startswith(prefix) for prefix in excluded_prefixes.get(platform, ())):
+        return False
+    if platform == "reddit":
+        return "/comments/" in path
+    if platform == "x":
+        return "/status/" in path
+
+    direct_prefixes = {
+        "instagram": ("/p/", "/reel/", "/tv/"),
+        "facebook": ("/posts/", "/permalink/", "/videos/"),
+        "linkedin": ("/feed/update/",),
+        "tiktok": ("/@",),
+        "youtube": ("/watch", "/shorts/"),
+        "pinterest": ("/pin/",),
+    }
+    return any(path.startswith(prefix) for prefix in direct_prefixes.get(platform, ()))
+
+
+def _social_candidate_sort_key(candidate: SearchCandidate) -> tuple[int, int, int]:
+    return (
+        0 if candidate.match_type == "exact_matches" else 1,
+        0 if is_direct_social_url(candidate.link, candidate.platform) else 1,
+        candidate.position,
+    )
 
 
 class SearchAdapter(abc.ABC):
@@ -115,15 +161,14 @@ class SerpApiLensAdapter(SearchAdapter):
         # 2. Search exact_matches first
         raw_bytes, candidates, search_type = self._execute_search_type(image_id, "exact_matches")
         
-        # 3. Fallback to visual_matches if no social candidates in exact_matches
-        has_social = any(c.platform != "web" for c in candidates)
-        if not has_social or len(candidates) == 0:
-            try:
-                vm_raw_bytes, vm_candidates, vm_type = self._execute_search_type(image_id, "visual_matches")
-                if len(vm_candidates) > 0:
-                    raw_bytes, candidates, search_type = vm_raw_bytes, vm_candidates, vm_type
-            except Exception:
-                pass  # Keep exact matches if visual fallback encounters an error
+        # 3. Also collect visual matches so an exact repost does not hide other sources.
+        try:
+            vm_raw_bytes, vm_candidates, vm_type = self._execute_search_type(image_id, "visual_matches")
+            if len(vm_candidates) > 0:
+                candidates = self._merge_candidates(candidates, vm_candidates)
+                raw_bytes, search_type = vm_raw_bytes, vm_type
+        except Exception:
+            pass  # Keep exact matches if visual search encounters an error
 
         raw_sha256 = hashlib.sha256(raw_bytes).hexdigest()
 
@@ -136,6 +181,18 @@ class SerpApiLensAdapter(SearchAdapter):
             raw_response_sha256=raw_sha256,
             candidates=candidates,
         )
+
+    @staticmethod
+    def _merge_candidates(
+        primary: List[SearchCandidate], secondary: List[SearchCandidate]
+    ) -> List[SearchCandidate]:
+        seen_links = {candidate.link for candidate in primary}
+        merged = list(primary)
+        for candidate in secondary:
+            if candidate.link not in seen_links:
+                merged.append(candidate)
+                seen_links.add(candidate.link)
+        return merged
 
     def _execute_search_type(self, image_id: str, search_type: str) -> tuple[bytes, List[SearchCandidate], str]:
         params = {
@@ -158,10 +215,12 @@ class SerpApiLensAdapter(SearchAdapter):
         raw_bytes = resp.content
         data = resp.json()
 
-        candidates = self._parse_lens_response(data)
+        candidates = self._parse_lens_response(data, search_type=search_type)
         return raw_bytes, candidates, search_type
 
-    def _parse_lens_response(self, data: dict[str, Any]) -> List[SearchCandidate]:
+    def _parse_lens_response(
+        self, data: dict[str, Any], search_type: Optional[str] = None
+    ) -> List[SearchCandidate]:
         candidates: List[SearchCandidate] = []
         
         # Check exact_matches or visual_matches keys
@@ -189,6 +248,7 @@ class SerpApiLensAdapter(SearchAdapter):
                     platform=platform,
                     image_width=item.get("image_width"),
                     image_height=item.get("image_height"),
+                    match_type=search_type or ("exact_matches" if data.get("exact_matches") else "visual_matches"),
                 )
             )
 
